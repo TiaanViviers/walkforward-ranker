@@ -1,0 +1,39 @@
+# Configuration Schema
+# This file documents the expected structure of configuration files.
+
+data:
+  path: string               # Path to preprocessed data (parquet/csv)
+  date_col: string           # Column name for dates
+  group_col: string          # Column name for grouping (group_id)
+  label_col: string          # Column name for target variable (realized PnL)
+  config_features: list      # List of config parameter feature names
+  market_features: list      # List of market condition feature names
+  calendar_features: list    # List of calendar/dummy feature names
+
+walkforward:
+  initial_train_days: int    # Initial training period length
+  train_window_days: int     # Training window size (if rolling)
+  test_window_days: int      # Test period length
+  retrain_frequency_days: int # Retraining frequency
+  expanding_window: bool     # Use expanding (true) or rolling (false) window
+
+model:
+  objective: string          # LightGBM objective (e.g., 'lambdarank')
+  num_leaves: int            # Number of leaves in tree
+  learning_rate: float       # Learning rate
+  n_estimators: int          # Number of boosting rounds
+  random_state: int          # Random seed for reproducibility
+  # Additional LightGBM parameters can be added
+
+selection:
+  top_k: int                 # Number of top configs to select
+
+feature_selection:
+  correlation_threshold: float    # Threshold for removing correlated features
+  min_importance_percentile: int  # Percentile threshold for feature importance
+  variance_threshold: float       # Threshold for removing low-variance features
+
+paths:
+  feature_registry: string   # Path to feature registry JSON
+  models_dir: string         # Directory for saved models
+  results_dir: string        # Directory for results

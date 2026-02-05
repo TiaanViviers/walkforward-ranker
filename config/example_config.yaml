@@ -1,0 +1,89 @@
+# Example Configuration
+# This file contains dummy feature names for demonstration purposes.
+# Copy this to production_config.yaml and replace with your actual feature names.
+
+# Data structure:
+#   data/calibration/{asset}_calibration.parquet    - 10% for feature selection
+#   data/replay_window/{asset}_replay_window.parquet - 75% for walk-forward training
+#   data/holdout/{asset}_holdout.parquet            - 15% for final testing
+
+data:
+  date_col: "date"
+  group_col: "group_id"
+  label_col: "pnl"
+  
+  # Configuration parameters (action features)
+  config_features:
+    - "config_param_1"
+    - "config_param_2"
+    - "config_param_3"
+    - "config_param_4"
+  
+  # Market condition features (context features)
+  market_features:
+    - "market_feature_1"
+    - "market_feature_2"
+    - "market_feature_3"
+    - "market_feature_4"
+    - "market_feature_5"
+    # Add more as needed
+  
+  # Calendar features (dummies, events, etc.)
+  calendar_features:
+    - "calendar_dummy_1"
+    - "calendar_dummy_2"
+    - "calendar_dummy_3"
+    - "calendar_dummy_4"
+
+# Walk-forward validation settings
+walkforward:
+  # Initial training period (days)
+  initial_train_days: 365
+  
+  # Training window size (days)
+  # Use expanding_window=true to use all historical data
+  train_window_days: 365
+  
+  # Test period length (days)
+  test_window_days: 30
+  
+  # How often to retrain model weights (days)
+  retrain_frequency_days: 7
+  
+  # If true, use expanding window (all data up to test date)
+  # If false, use rolling window (only last N days)
+  expanding_window: false
+
+# Model hyperparameters
+model:
+  objective: "lambdarank"
+  num_leaves: 31
+  learning_rate: 0.05
+  n_estimators: 100
+  max_depth: -1
+  min_child_samples: 20
+  subsample: 0.8
+  colsample_bytree: 0.8
+  random_state: 42
+
+# Selection policy
+selection:
+  # Number of top-ranked configs to select
+  top_k: 3
+
+# Feature selection settings
+feature_selection:
+  # Remove features with correlation > threshold
+  correlation_threshold: 0.95
+  
+  # Remove features with importance below this percentile
+  min_importance_percentile: 5
+  
+  # Remove features with variance below this threshold
+  variance_threshold: 1e-6
+
+# Paths
+paths:
+  feature_registry: "config/feature_registry.json"
+  models_dir: "models"
+  results_dir: "results"

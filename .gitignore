@@ -1,3 +1,35 @@
+# ========================================
+# PROJECT-SPECIFIC: Sensitive Data
+# ========================================
+
+# Sensitive data files
+data/*
+!data/.gitkeep
+
+# Private configs with real feature names
+config/production_config.yaml
+config/*_prod.yaml
+config/*_production.yaml
+
+# Generated feature artifacts (asset-specific)
+config/feature_registry*.json
+config/feature_selection_info*.json
+
+# Model artifacts
+models/*
+!models/.gitkeep
+
+# Results
+results/*
+!results/.gitkeep
+
+# Notebooks with real data
+notebooks/*_private*.ipynb
+
+# ========================================
+# PYTHON
+# ========================================
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
