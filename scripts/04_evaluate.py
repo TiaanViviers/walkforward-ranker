@@ -41,7 +41,7 @@ def main():
     importance_df = pd.read_csv(results_path / 'feature_importance.csv')
     
     print("\n" + "="*70)
-    print("OVERALL PERFORMANCE")
+    print("HOLDOUT SET PERFORMANCE")
     print("="*70)
     
     # Determine k from split metrics
@@ -58,11 +58,11 @@ def main():
         label_col='relevance_grade',
         pnl_col='pnl'
     )
-    print_metrics(overall_metrics)
+    print_metrics(overall_metrics, title="HOLDOUT SET PERFORMANCE")
     
     # Per-split performance
     print("\n" + "="*70)
-    print("PER-SPLIT PERFORMANCE")
+    print("PER-SPLIT HOLDOUT PERFORMANCE")
     print("="*70)
     
     splits_df = pd.DataFrame(split_metrics)

@@ -58,7 +58,8 @@ def main():
         config.get_model_params(),
         correlation_threshold=config.feature_selection.correlation_threshold,
         min_importance_percentile=config.feature_selection.min_importance_percentile,
-        variance_threshold=config.feature_selection.variance_threshold
+        variance_threshold=config.feature_selection.variance_threshold,
+        removal_strategy=config.feature_selection.removal_strategy
     )
     
     # Create feature registry
@@ -84,9 +85,12 @@ def main():
     print("\n" + "="*70)
     print("FEATURE SELECTION SUMMARY")
     print("="*70)
+    print(f"Strategy:             {selection_info['removal_strategy']}")
     print(f"Initial features:     {selection_info['initial_count']}")
-    print(f"After variance:       {selection_info['after_variance']}")
-    print(f"After correlation:    {selection_info['after_correlation']}")
+    print(f"Flagged variance:     {len(selection_info['flagged_variance'])}")
+    print(f"Flagged correlation:  {len(selection_info['flagged_correlation'])}")
+    print(f"Flagged importance:   {len(selection_info['flagged_importance'])}")
+    print(f"Removed features:     {len(selection_info['removed_features'])}")
     print(f"Final features:       {selection_info['final_count']}")
     print(f"Reduction:            {100 * (1 - selection_info['final_count'] / selection_info['initial_count']):.1f}%")
     print("="*70)

@@ -165,11 +165,11 @@ def evaluate_predictions(
     pnl_col: str = 'pnl'
 ) -> Dict[str, float]:
     """
-    Calculate all evaluation metrics.
+    Calculate all evaluation metrics for k=1, 3, and 5.
     
     Args:
         df: DataFrame with all necessary columns
-        k: K value for top-K metrics
+        k: Primary K value for top-K metrics (default: 3)
         group_col: Group column name
         predicted_rank_col: Predicted rank column
         actual_rank_col: Actual rank column
@@ -178,86 +178,94 @@ def evaluate_predictions(
         pnl_col: Actual PnL column for business metrics
         
     Returns:
-        Dictionary of metrics
+        Dictionary of metrics for k=1, 3, and 5
     """
-    # Calculate PnL metrics (most important for business)
-    predicted_pnl_per_group = df[df[predicted_rank_col] <= k].groupby(group_col)[pnl_col].sum()
-    optimal_pnl_per_group = df.groupby(group_col).apply(lambda x: x.nlargest(k, pnl_col)[pnl_col].sum())
+    metrics = {}
     
-    mean_predicted_pnl = predicted_pnl_per_group.mean()
-    mean_optimal_pnl = optimal_pnl_per_group.mean()
-    median_predicted_pnl = predicted_pnl_per_group.median()
-    total_predicted_pnl = predicted_pnl_per_group.sum()
-    total_optimal_pnl = optimal_pnl_per_group.sum()
-    
-    # Win rate of predicted configs
-    predicted_win_rate = (df[df[predicted_rank_col] <= k][pnl_col] > 0).sum() / (df[predicted_rank_col] <= k).sum()
-    optimal_win_rate = (df.groupby(group_col).apply(lambda x: x.nlargest(k, pnl_col)[pnl_col] > 0).sum() / 
-                        df.groupby(group_col).apply(lambda x: k).sum())
-    
-    # PnL efficiency: ratio of realized to optimal
-    pnl_efficiency = mean_predicted_pnl / mean_optimal_pnl if mean_optimal_pnl != 0 else 0.0
-    
-    metrics = {
-        # === PNL METRICS (PRIMARY) ===
-        'mean_selected_pnl': mean_predicted_pnl,
-        'median_selected_pnl': median_predicted_pnl,
-        'total_selected_pnl': total_predicted_pnl,
-        'mean_optimal_pnl': mean_optimal_pnl,
-        'total_optimal_pnl': total_optimal_pnl,
-        'pnl_efficiency': pnl_efficiency,  # ratio: selected/optimal
-        f'regret_{k}': regret(df, k, group_col, predicted_rank_col, pnl_col),
-        'win_rate_selected': predicted_win_rate,
-        'win_rate_optimal': optimal_win_rate,
+    # Calculate metrics for k=1, 3, and 5
+    for k_val in [1, 3, 5]:
+        # Calculate PnL metrics
+        predicted_pnl_per_group = df[df[predicted_rank_col] <= k_val].groupby(group_col)[pnl_col].sum()
+        optimal_pnl_per_group = df.groupby(group_col).apply(lambda x: x.nlargest(k_val, pnl_col)[pnl_col].sum())
         
-        # === RANKING METRICS (SECONDARY) ===
-        f'hit_rate_{k}': hit_rate_at_k(
-            df, k, group_col, predicted_rank_col, actual_rank_col
-        ),
-        f'precision_{k}': precision_at_k(
-            df, k, group_col, predicted_rank_col, actual_rank_col
-        ),
-        f'ndcg_{k}': ndcg_at_k(
-            df, k, group_col, label_col, score_col
-        ),
-    }
+        mean_predicted_pnl = predicted_pnl_per_group.mean()
+        mean_optimal_pnl = optimal_pnl_per_group.mean()
+        median_predicted_pnl = predicted_pnl_per_group.median()
+        total_predicted_pnl = predicted_pnl_per_group.sum()
+        total_optimal_pnl = optimal_pnl_per_group.sum()
+        
+        # Win rate of predicted configs
+        predicted_win_rate = (df[df[predicted_rank_col] <= k_val][pnl_col] > 0).sum() / (df[predicted_rank_col] <= k_val).sum()
+        optimal_win_rate = (df.groupby(group_col).apply(lambda x: x.nlargest(k_val, pnl_col)[pnl_col] > 0).sum() / 
+                            df.groupby(group_col).apply(lambda x: k_val).sum())
+        
+        # PnL efficiency: ratio of realized to optimal
+        pnl_efficiency = mean_predicted_pnl / mean_optimal_pnl if mean_optimal_pnl != 0 else 0.0
+        
+        # Add metrics with k suffix
+        metrics.update({
+            # === PNL METRICS (PRIMARY) ===
+            f'mean_selected_pnl_{k_val}': mean_predicted_pnl,
+            f'median_selected_pnl_{k_val}': median_predicted_pnl,
+            f'total_selected_pnl_{k_val}': total_predicted_pnl,
+            f'mean_optimal_pnl_{k_val}': mean_optimal_pnl,
+            f'total_optimal_pnl_{k_val}': total_optimal_pnl,
+            f'pnl_efficiency_{k_val}': pnl_efficiency,
+            f'regret_{k_val}': regret(df, k_val, group_col, predicted_rank_col, pnl_col),
+            f'win_rate_selected_{k_val}': predicted_win_rate,
+            f'win_rate_optimal_{k_val}': optimal_win_rate,
+            
+            # === RANKING METRICS (SECONDARY) ===
+            f'hit_rate_{k_val}': hit_rate_at_k(
+                df, k_val, group_col, predicted_rank_col, actual_rank_col
+            ),
+            f'precision_{k_val}': precision_at_k(
+                df, k_val, group_col, predicted_rank_col, actual_rank_col
+            ),
+            f'ndcg_{k_val}': ndcg_at_k(
+                df, k_val, group_col, label_col, score_col
+            ),
+        })
     
     return metrics
 
 
-def print_metrics(metrics: Dict[str, float]):
-    """Print metrics in formatted way with PnL metrics highlighted."""
-    print("\n" + "=" * 60)
-    print("EVALUATION METRICS")
-    print("=" * 60)
+def print_metrics(metrics: Dict[str, float], title: str = "EVALUATION METRICS"):
+    """Print metrics with explicit explanations for top-1, top-3, and top-5."""
+    print("\n" + "=" * 80)
+    print(title)
+    print("=" * 80)
     
-    # PnL metrics first (most important)
-    print("\n📊 PNL METRICS (Primary):")
-    print("-" * 60)
-    pnl_keys = ['mean_selected_pnl', 'median_selected_pnl', 'total_selected_pnl',
-                'mean_optimal_pnl', 'total_optimal_pnl', 'pnl_efficiency',
-                'win_rate_selected', 'win_rate_optimal']
-    regret_keys = [k for k in metrics.keys() if 'regret' in k]
+    for k_val in [1, 3, 5]:
+        print(f"\n TOP-{k_val} SELECTION METRICS")
+        print("-" * 80)
+        
+        mean_sel = metrics.get(f'mean_selected_pnl_{k_val}', 0)
+        mean_opt = metrics.get(f'mean_optimal_pnl_{k_val}', 0)
+        efficiency = metrics.get(f'pnl_efficiency_{k_val}', 0)
+        regret = metrics.get(f'regret_{k_val}', 0)
+        win_rate_sel = metrics.get(f'win_rate_selected_{k_val}', 0)
+        hit_rate = metrics.get(f'hit_rate_{k_val}', 0)
+        ndcg = metrics.get(f'ndcg_{k_val}', 0)
+        
+        print(f"  Selection Strategy: Pick top-{k_val} ranked configs each day")
+        print(f"  Mean Daily PnL (selected): ${mean_sel:,.2f}")
+        print(f"  Mean Daily PnL (optimal):  ${mean_opt:,.2f}")
+        print(f"  Efficiency: {efficiency:.2%} (capturing {efficiency:.2%} of optimal profit)")
+        print(f"  Regret: ${regret:,.2f}/day (leaving this much on the table)")
+        print(f"  Win Rate: {win_rate_sel:.2%} (% of selected configs with positive PnL)")
+        print(f"  Hit Rate: {hit_rate:.2%} (% days with ≥1 actual top-{k_val} in predicted top-{k_val})")
+        print(f"  NDCG@{k_val}: {ndcg:.4f} (ranking quality: 0=random, 1=perfect)")
     
-    for key in pnl_keys + regret_keys:
-        if key in metrics:
-            value = metrics[key]
-            if 'efficiency' in key:
-                print(f"  {key:30s}: {value:10.2%}")
-            elif 'win_rate' in key:
-                print(f"  {key:30s}: {value:10.2%}")
-            else:
-                print(f"  {key:30s}: {value:10.2f}")
-    
-    # Ranking metrics second
-    print("\n🎯 RANKING METRICS (Secondary):")
-    print("-" * 60)
-    ranking_keys = ['hit_rate', 'precision', 'ndcg']
-    for metric, value in metrics.items():
-        if any(rk in metric for rk in ranking_keys):
-            if 'ndcg' in metric:
-                print(f"  {metric:30s}: {value:10.4f}")
-            else:
-                print(f"  {metric:30s}: {value:10.2%}")
-    
-    print("=" * 60)
+    print("\n" + "=" * 80)
+    print("SUMMARY ACROSS ALL K VALUES")
+    print("=" * 80)
+    print(f"  {'K':<5} {'Mean PnL':<12} {'Efficiency':<12} {'Win Rate':<12} {'NDCG':<10}")
+    print("-" * 80)
+    for k_val in [1, 3, 5]:
+        mean_sel = metrics.get(f'mean_selected_pnl_{k_val}', 0)
+        efficiency = metrics.get(f'pnl_efficiency_{k_val}', 0)
+        win_rate = metrics.get(f'win_rate_selected_{k_val}', 0)
+        ndcg = metrics.get(f'ndcg_{k_val}', 0)
+        print(f"  {k_val:<5} ${mean_sel:<11,.2f} {efficiency:<11.2%} {win_rate:<11.2%} {ndcg:<10.4f}")
+    print("=" * 80)

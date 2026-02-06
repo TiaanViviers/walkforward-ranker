@@ -1,18 +1,18 @@
-"""Feature selection utilities."""
+"""Feature selection utilities with parallel flagging."""
 
 import pandas as pd
 import numpy as np
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Dict, Set
 from src.ranker import train_ranker
 
 
-def remove_low_variance_features(
+def flag_low_variance_features(
     df: pd.DataFrame,
     features: List[str],
     threshold: float = 1e-6
-) -> List[str]:
+) -> Set[str]:
     """
-    Remove features with very low variance.
+    Flag features with very low variance.
     
     Args:
         df: DataFrame containing features
@@ -20,28 +20,27 @@ def remove_low_variance_features(
         threshold: Variance threshold
         
     Returns:
-        List of features with sufficient variance
+        Set of features flagged for low variance
     """
     variances = df[features].var()
-    keep = variances[variances > threshold].index.tolist()
-    removed = set(features) - set(keep)
+    low_var = variances[variances <= threshold].index.tolist()
     
-    if removed:
-        print(f"Removed {len(removed)} low-variance features")
+    if low_var:
+        print(f"Flagged {len(low_var)} low-variance features")
     
-    return keep
+    return set(low_var)
 
 
-def remove_correlated_features(
+def flag_correlated_features(
     df: pd.DataFrame,
     features: List[str],
     label_col: str,
     threshold: float = 0.95
-) -> Tuple[List[str], List[str]]:
+) -> Set[str]:
     """
-    Remove highly correlated features.
+    Flag highly correlated features.
     
-    When two features are highly correlated, keeps the one more
+    When two features are highly correlated, flags the one less
     correlated with the target variable.
     
     Args:
@@ -51,48 +50,45 @@ def remove_correlated_features(
         threshold: Correlation threshold
         
     Returns:
-        Tuple of (kept_features, removed_features)
+        Set of features flagged for high correlation
     """
     # Compute correlation matrices
     feature_corr = df[features].corr().abs()
     target_corr = df[features + [label_col]].corr()[label_col].abs()
     
-    to_remove = set()
+    flagged = set()
     
     for i, feat1 in enumerate(features):
-        if feat1 in to_remove:
+        if feat1 in flagged:
             continue
         
         for feat2 in features[i+1:]:
-            if feat2 in to_remove:
+            if feat2 in flagged:
                 continue
             
             # Check if highly correlated
             if feature_corr.loc[feat1, feat2] > threshold:
-                # Keep the one more correlated with target
+                # Flag the one less correlated with target
                 if target_corr[feat1] >= target_corr[feat2]:
-                    to_remove.add(feat2)
+                    flagged.add(feat2)
                 else:
-                    to_remove.add(feat1)
+                    flagged.add(feat1)
     
-    kept = [f for f in features if f not in to_remove]
-    removed = list(to_remove)
+    print(f"Flagged {len(flagged)} correlated features (threshold={threshold})")
     
-    print(f"Removed {len(removed)} correlated features (threshold={threshold})")
-    
-    return kept, removed
+    return flagged
 
 
-def select_by_importance(
+def flag_low_importance_features(
     train_df: pd.DataFrame,
     feature_cols: List[str],
     label_col: str,
     group_col: str,
     params: dict,
     min_percentile: int = 5
-) -> Tuple[List[str], pd.DataFrame]:
+) -> Tuple[Set[str], pd.DataFrame]:
     """
-    Select features based on model importance.
+    Flag features with low importance.
     
     Args:
         train_df: Training data
@@ -100,10 +96,10 @@ def select_by_importance(
         label_col: Label column name
         group_col: Group column name
         params: Model parameters
-        min_percentile: Keep features above this importance percentile
+        min_percentile: Flag features below this importance percentile
         
     Returns:
-        Tuple of (selected_features, importance_df)
+        Tuple of (flagged_features, importance_df)
     """
     # Train model on all features
     model = train_ranker(
@@ -123,15 +119,16 @@ def select_by_importance(
         min_percentile
     )
     
-    # Select features above threshold
-    selected = importance_df[
-        importance_df['importance'] > threshold
-    ]['feature'].tolist()
+    # Flag features below threshold
+    flagged = set(
+        importance_df[
+            importance_df['importance'] <= threshold
+        ]['feature'].tolist()
+    )
     
-    print(f"Selected {len(selected)} / {len(feature_cols)} features "
-          f"(>{min_percentile}th percentile)")
+    print(f"Flagged {len(flagged)} low-importance features (<={min_percentile}th percentile)")
     
-    return selected, importance_df
+    return flagged, importance_df
 
 
 def select_features(
@@ -142,15 +139,16 @@ def select_features(
     params: dict,
     correlation_threshold: float = 0.95,
     min_importance_percentile: int = 5,
-    variance_threshold: float = 1e-6
+    variance_threshold: float = 1e-6,
+    removal_strategy: str = "conservative"
 ) -> Tuple[List[str], dict]:
     """
-    Full feature selection pipeline.
+    Feature selection with parallel flagging.
     
-    Steps:
-    1. Remove low-variance features
-    2. Remove correlated features
-    3. Select by importance
+    Strategies:
+    - aggressive: Remove if flagged by ANY criterion
+    - moderate: Remove if flagged by 2+ criteria
+    - conservative: Remove if flagged by ALL criteria
     
     Args:
         df: Full dataset
@@ -161,6 +159,7 @@ def select_features(
         correlation_threshold: Correlation threshold
         min_importance_percentile: Importance percentile threshold
         variance_threshold: Variance threshold
+        removal_strategy: Strategy for removal (aggressive/moderate/conservative)
         
     Returns:
         Tuple of (final_features, selection_info_dict)
@@ -169,42 +168,73 @@ def select_features(
     correlation_threshold = float(correlation_threshold)
     min_importance_percentile = int(min_importance_percentile)
     
-    # Remove low variance
-    features_v1 = remove_low_variance_features(
-        df, feature_cols, variance_threshold
-    )
-    print(f"After variance filter: {len(features_v1)}")
+    print(f"\nFeature selection strategy: {removal_strategy}")
+    print(f"Running parallel flagging on {len(feature_cols)} features...")
     
-    # Remove correlated
-    features_v2, removed_corr = remove_correlated_features(
-        df, features_v1, label_col, correlation_threshold
-    )
-    print(f"After correlation filter: {len(features_v2)}")
+    # Flag features based on each criterion (parallel)
+    variance_flags = flag_low_variance_features(df, feature_cols, variance_threshold)
+    correlation_flags = flag_correlated_features(df, feature_cols, label_col, correlation_threshold)
     
-    # Select by importance
-    # Use subset of data for speed (first year)
+    # Use subset of data for importance (speed)
     train_subset = df.head(min(len(df), 500000))
-    
-    features_v3, importance_df = select_by_importance(
+    importance_flags, importance_df = flag_low_importance_features(
         train_subset,
-        features_v2,
+        feature_cols,
         label_col,
         group_col,
         params,
         min_importance_percentile
     )
-    print(f"After importance filter: {len(features_v3)}")
+    
+    # Create flag count per feature
+    flag_counts = {}
+    for feat in feature_cols:
+        count = 0
+        if feat in variance_flags:
+            count += 1
+        if feat in correlation_flags:
+            count += 1
+        if feat in importance_flags:
+            count += 1
+        flag_counts[feat] = count
+    
+    # Apply removal strategy
+    if removal_strategy == "aggressive":
+        # Remove if flagged by ANY criterion (1+ flags)
+        to_remove = {f for f, count in flag_counts.items() if count >= 1}
+        print(f"\nAggressive: Removing features with 1+ flags")
+    elif removal_strategy == "moderate":
+        # Remove if flagged by 2+ criteria
+        to_remove = {f for f, count in flag_counts.items() if count >= 2}
+        print(f"\nModerate: Removing features with 2+ flags")
+    else:  # conservative
+        # Remove if flagged by ALL criteria
+        to_remove = {f for f, count in flag_counts.items() if count == 3}
+        print(f"\nConservative: Removing features with 3 flags")
+    
+    final_features = [f for f in feature_cols if f not in to_remove]
+    
+    # Print summary by flag count
+    print(f"\nFlag Summary:")
+    for flag_count in [0, 1, 2, 3]:
+        count = sum(1 for c in flag_counts.values() if c == flag_count)
+        if count > 0:
+            print(f"  {flag_count} flags: {count} features")
+    
+    print(f"\nFinal: {len(final_features)} features kept, {len(to_remove)} removed")
     
     # Collect selection info
     selection_info = {
         'initial_count': len(feature_cols),
-        'after_variance': len(features_v1),
-        'after_correlation': len(features_v2),
-        'final_count': len(features_v3),
-        'removed_variance': list(set(feature_cols) - set(features_v1)),
-        'removed_correlation': removed_corr,
-        'final_features': features_v3,
+        'final_count': len(final_features),
+        'removal_strategy': removal_strategy,
+        'flagged_variance': list(variance_flags),
+        'flagged_correlation': list(correlation_flags),
+        'flagged_importance': list(importance_flags),
+        'flag_counts': flag_counts,
+        'removed_features': list(to_remove),
+        'final_features': final_features,
         'importance': importance_df.to_dict('records')
     }
     
-    return features_v3, selection_info
+    return final_features, selection_info

@@ -11,6 +11,7 @@ import argparse
 import sys
 from pathlib import Path
 import pandas as pd
+import numpy as np
 import json
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -113,19 +114,25 @@ def main():
         )
         
         if args.verbose:
-            print(f"  Mean PnL (selected): ${metrics['mean_selected_pnl']:.2f}")
-            print(f"  PnL Efficiency: {metrics['pnl_efficiency']:.2%}")
-            print(f"  NDCG@{config.selection.top_k}: {metrics[f'ndcg_{config.selection.top_k}']:.4f}")
+            k = config.selection.top_k
+            print(f"  Mean PnL (top-{k}): ${metrics[f'mean_selected_pnl_{k}']:.2f}")
+            print(f"  Efficiency: {metrics[f'pnl_efficiency_{k}']:.2%}")
+            print(f"  NDCG@{k}: {metrics[f'ndcg_{k}']:.4f}")
         
         # Store results
         all_predictions.append(test_df)
+        
+        # Convert metrics to JSON-serializable types (float/int instead of numpy types)
+        json_metrics = {k: float(v) if isinstance(v, (np.floating, np.integer)) else v 
+                       for k, v in metrics.items()}
+        
         split_metrics.append({
             'split': i,
             'train_start': str(train_df[config.data.date_col].min()),
             'train_end': str(train_df[config.data.date_col].max()),
             'test_start': str(test_df[config.data.date_col].min()),
             'test_end': str(test_df[config.data.date_col].max()),
-            **metrics
+            **json_metrics
         })
     
     if not args.verbose:
@@ -139,7 +146,6 @@ def main():
     all_predictions_df = pd.concat(all_predictions, ignore_index=True)
     
     # Overall metrics
-    print("\nOverall Performance:")
     overall_metrics = evaluate_predictions(
         all_predictions_df,
         k=config.selection.top_k,
@@ -147,7 +153,7 @@ def main():
         label_col=config.data.label_col,
         pnl_col=config.data.pnl_col
     )
-    print_metrics(overall_metrics)
+    print_metrics(overall_metrics, title="REPLAY WINDOW PERFORMANCE (Walk-Forward Validation)")
     
     # Train final model on all data
     print("\nTraining final model on full dataset...")

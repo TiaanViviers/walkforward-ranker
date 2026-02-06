@@ -27,6 +27,7 @@ class WalkForwardConfig:
     test_window_days: int = 30
     retrain_frequency_days: int = 7
     expanding_window: bool = False
+    max_training_window_days: int = 504  # Cap for expanding window (2 trading years default)
 
 
 @dataclass
@@ -52,6 +53,7 @@ class FeatureSelectionConfig:
     correlation_threshold: float = 0.95
     min_importance_percentile: int = 5
     variance_threshold: float = 1e-6
+    removal_strategy: str = "conservative"  # aggressive, moderate, conservative
 
 
 @dataclass

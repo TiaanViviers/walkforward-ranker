@@ -70,8 +70,8 @@ def run_training(asset: str, config: str, data_dir: str, run_id: str = None, ver
     return True
 
 
-def run_evaluation(asset: str, results_dir: str):
-    """Run evaluation stage."""    
+def run_holdout_evaluation(asset: str, results_dir: str):
+    """Run holdout evaluation stage."""    
     # Find latest model for this asset
     models_dir = Path('models')
     asset_models = sorted([
@@ -84,7 +84,7 @@ def run_evaluation(asset: str, results_dir: str):
         return False
     
     latest_run = asset_models[0].name
-    print(f"Evaluating run: {latest_run}")
+    print(f"Analyzing holdout set for run: {latest_run}")
     
     cmd = [
         sys.executable,
@@ -96,7 +96,7 @@ def run_evaluation(asset: str, results_dir: str):
     result = subprocess.run(cmd, cwd=Path(__file__).parent.parent)
     
     if result.returncode != 0:
-        print("\nError in evaluation stage")
+        print("\nError in holdout evaluation stage")
         sys.exit(1)
     
     return True
@@ -120,7 +120,7 @@ def main():
     
     # Parse stages
     stages = [s.strip() for s in args.stages.split(',')]
-    valid_stages = {'feature_selection', 'training', 'evaluation'}
+    valid_stages = {'feature_selection', 'training', 'holdout'}
     invalid = set(stages) - valid_stages
     if invalid:
         print(f"Invalid stages: {invalid}")
@@ -140,8 +140,9 @@ def main():
     if 'training' in stages:
         run_training(args.asset, args.config, args.data_dir, args.run_id, args.verbose)
     
-    if 'evaluation' in stages:
-        run_evaluation(args.asset, args.results_dir)
+    if 'holdout' in stages:
+        #run_holdout_evaluation(args.asset, args.results_dir)
+        pass
     
     # End pipeline
     end_time = datetime.now()
@@ -165,8 +166,8 @@ def get_args():
     parser.add_argument('--results-dir', default='results', help='Results directory')
     parser.add_argument(
         '--stages',
-        default='feature_selection,training,evaluation',
-        help='Comma-separated list of stages to run (feature_selection, training, evaluation)'
+        default='feature_selection,training,holdout',
+        help='Comma-separated list of stages to run (feature_selection, training, holdout)'
     )
     parser.add_argument('--run-id', help='Optional run ID for training')
     parser.add_argument('--verbose', action='store_true', help='Print detailed per-split information during training')

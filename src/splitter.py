@@ -19,23 +19,29 @@ class WalkForwardSplitter:
         train_window_days: int = 365,
         test_window_days: int = 30,
         retrain_frequency_days: int = 7,
-        expanding_window: bool = False
+        expanding_window: bool = False,
+        max_training_window_days: int = 504
     ):
         """
         Initialize walk-forward splitter.
         
         Args:
-            initial_train_days: Initial training period length
-            train_window_days: Training window size (if rolling)
-            test_window_days: Test period length
-            retrain_frequency_days: How often to create new splits
-            expanding_window: If True, use all data up to test start
+            initial_train_days: Initial training period (in TRADING days, not calendar days)
+            train_window_days: Training window size in trading days (if rolling)
+            test_window_days: Test period length in TRADING days
+            retrain_frequency_days: How often to create new splits (TRADING days)
+            expanding_window: If True, use expanding window with max cap
+            max_training_window_days: Maximum training window in TRADING days (cap for expanding)
+        
+        Note: All day counts refer to TRADING days (actual dates in data), 
+              not calendar days. This handles weekends/holidays automatically.
         """
         self.initial_train_days = initial_train_days
         self.train_window_days = train_window_days
         self.test_window_days = test_window_days
         self.retrain_frequency_days = retrain_frequency_days
         self.expanding_window = expanding_window
+        self.max_training_window_days = max_training_window_days
     
     def split(
         self,
@@ -43,7 +49,7 @@ class WalkForwardSplitter:
         date_col: str = "date"
     ) -> Iterator[Tuple[pd.DataFrame, pd.DataFrame]]:
         """
-        Generate walk-forward splits.
+        Generate walk-forward splits based on actual trading days in data.
         
         Args:
             df: DataFrame with date column
@@ -53,51 +59,59 @@ class WalkForwardSplitter:
             Tuples of (train_df, test_df)
         """
         df = df.sort_values(date_col)
-        dates = df[date_col].unique()
-        dates = np.sort(dates)
+        unique_dates = pd.Series(df[date_col].unique()).sort_values().reset_index(drop=True)
+        n_dates = len(unique_dates)
         
-        # Minimum date for first test split
-        min_date = dates[0]
-        first_test_start = min_date + pd.Timedelta(days=self.initial_train_days)
+        # Find index where test period starts (after initial training period)
+        if self.initial_train_days >= n_dates:
+            return  # Not enough data
         
-        # Start from first test date
-        current_test_start = first_test_start
+        test_start_idx = self.initial_train_days
         
-        while current_test_start <= dates[-1]:
-            test_end = current_test_start + pd.Timedelta(days=self.test_window_days)
+        while test_start_idx < n_dates:
+            # Define test window (exactly test_window_days trading days)
+            test_end_idx = min(test_start_idx + self.test_window_days, n_dates)
             
-            # Stop if test window goes beyond data
-            if test_end > dates[-1]:
+            # Stop if we can't get a full test window
+            if test_end_idx - test_start_idx < self.test_window_days:
                 break
             
-            # Define train window
+            # Define train window based on strategy
             if self.expanding_window:
-                train_start = min_date
+                # Expanding window: grow from start, but cap at max_training_window_days
+                train_start_idx = max(0, test_start_idx - self.max_training_window_days)
             else:
-                train_start = current_test_start - pd.Timedelta(days=self.train_window_days)
+                # Rolling window: fixed size
+                train_start_idx = max(0, test_start_idx - self.train_window_days)
             
-            train_end = current_test_start
+            train_end_idx = test_start_idx
             
-            # Get train and test data
+            # Get actual date boundaries
+            train_start_date = unique_dates.iloc[train_start_idx]
+            train_end_date = unique_dates.iloc[train_end_idx - 1]  # Inclusive
+            test_start_date = unique_dates.iloc[test_start_idx]
+            test_end_date = unique_dates.iloc[test_end_idx - 1]  # Inclusive
+            
+            # Filter dataframe by date ranges (inclusive on both ends)
             train_df = df[
-                (df[date_col] >= train_start) & 
-                (df[date_col] < train_end)
+                (df[date_col] >= train_start_date) & 
+                (df[date_col] <= train_end_date)
             ]
             
             test_df = df[
-                (df[date_col] >= current_test_start) & 
-                (df[date_col] < test_end)
+                (df[date_col] >= test_start_date) & 
+                (df[date_col] <= test_end_date)
             ]
             
             # Skip if either split is empty
             if len(train_df) == 0 or len(test_df) == 0:
-                current_test_start += pd.Timedelta(days=self.retrain_frequency_days)
+                test_start_idx += self.retrain_frequency_days
                 continue
             
             yield train_df, test_df
             
-            # Move to next test window
-            current_test_start += pd.Timedelta(days=self.retrain_frequency_days)
+            # Move to next test window (by retrain_frequency trading days)
+            test_start_idx += self.retrain_frequency_days
     
     def get_split_info(
         self,
@@ -114,21 +128,25 @@ class WalkForwardSplitter:
         Returns:
             List of dicts with split information
         """
-        split_info = []
+        # Count actual unique trading days
+        train_trading_days = train_df[date_col].nunique()
+        test_trading_days = test_df[date_col].nunique()
         
-        for i, (train_df, test_df) in enumerate(self.split(df, date_col)):
-            info = {
-                'split_id': i,
-                'train_start': train_df[date_col].min(),
-                'train_end': train_df[date_col].max(),
-                'test_start': test_df[date_col].min(),
-                'test_end': test_df[date_col].max(),
-                'train_size': len(train_df),
-                'test_size': len(test_df),
-                'train_days': (train_df[date_col].max() - train_df[date_col].min()).days,
-                'test_days': (test_df[date_col].max() - test_df[date_col].min()).days
-            }
-            split_info.append(info)
+        info = {
+            'split_id': i,
+            'train_start': train_df[date_col].min(),
+            'train_end': train_df[date_col].max(),
+            'test_start': test_df[date_col].min(),
+            'test_end': test_df[date_col].max(),
+            'train_size': len(train_df),
+            'test_size': len(test_df),
+            'train_trading_days': train_trading_days,
+            'test_trading_days': test_trading_days,
+            'test_size': len(test_df),
+            'train_days': (train_df[date_col].max() - train_df[date_col].min()).days,
+            'test_days': (test_df[date_col].max() - test_df[date_col].min()).days
+        }
+        split_info.append(info)
         
         return split_info
 
@@ -148,5 +166,6 @@ def create_splitter(config) -> WalkForwardSplitter:
         train_window_days=config.walkforward.train_window_days,
         test_window_days=config.walkforward.test_window_days,
         retrain_frequency_days=config.walkforward.retrain_frequency_days,
-        expanding_window=config.walkforward.expanding_window
+        expanding_window=config.walkforward.expanding_window,
+        max_training_window_days=config.walkforward.max_training_window_days
     )

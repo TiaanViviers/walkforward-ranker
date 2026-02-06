@@ -23,6 +23,9 @@ models/*
 results/*
 !results/.gitkeep
 
+#private bash script
+mv_data.sh
+
 # Notebooks with real data
 notebooks/*_private*.ipynb
 
