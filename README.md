@@ -172,6 +172,25 @@ Evaluate walk-forward results:
 python scripts/04_evaluate.py --run-id us30_20260205_103000
 ```
 
+### 8. Clean Generated Artifacts
+
+Remove generated run artifacts when `models/`, `results/`, and cache folders get large:
+
+```bash
+# Preview what would be removed
+python scripts/clean_generated.py --all --dry-run
+
+# Remove generated artifacts
+python scripts/clean_generated.py --all
+```
+
+Optional shortcuts:
+
+```bash
+make clean-dry
+make clean
+```
+
 ## Configuration
 
 Key configuration options:

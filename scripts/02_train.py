@@ -25,6 +25,27 @@ from src.selector import add_rankings
 from src.evaluator import evaluate_predictions, print_metrics
 from src.model_artifacts import ModelArtifact
 from src.asset_utils import get_asset_paths
+from src.hyperparameter_tuner import HyperparameterTuner
+
+
+def detect_quarter_boundary(split_idx: int, retrain_frequency: int, tune_every_quarters: int) -> bool:
+    """
+    Detect if we're at a quarter boundary (time to retune hyperparameters).
+    
+    Args:
+        split_idx: Current split index (0-based)
+        retrain_frequency: Days between retrains (typically 5)
+        tune_every_quarters: Tune every N quarters
+        
+    Returns:
+        True if this is the start of a tuning quarter
+    """
+    # ~63 trading days per quarter, retraining every 5 days = ~13 splits per quarter
+    splits_per_quarter = 63 // retrain_frequency
+    splits_per_tuning_period = splits_per_quarter * tune_every_quarters
+    
+    # Tune at start of every tuning period (split 0, 13, 26, 39, ...)
+    return split_idx % splits_per_tuning_period == 0
 
 
 def main():
@@ -36,42 +57,122 @@ def main():
     parser.add_argument('--verbose', action='store_true', help='Print detailed per-split information')
     args = parser.parse_args()
     
-    print("="*70)
+    print("\n" + "="*70)
     print("WALK-FORWARD TRAINING")
     print("="*70)
-    print(f"Asset: {args.asset}")
     
     asset_paths = get_asset_paths(args.asset, args.data_dir)
     config = load_config(args.config)
     registry_path = config.paths.feature_registry.replace('.json', f'_{args.asset}.json')
     registry = FeatureRegistry(registry_path)
     feature_cols = registry.get_feature_order()
-    df = load_data(str(asset_paths.replay_window), config.data.date_col)
+    print(f"Loaded {len(feature_cols)} features from registry")
     
-    # Validate features exist and filter to selected features + essential columns
+    # Load calibration (training burn-in) + replay_window (evaluation)
+    calibration_df = load_data(str(asset_paths.calibration), config.data.date_col)
+    replay_df = load_data(str(asset_paths.replay_window), config.data.date_col)
+    
+    # Validate features exist
     essential_cols = [config.data.date_col, config.data.group_col, config.data.label_col]
     if hasattr(config.data, 'pnl_col') and config.data.pnl_col:
         essential_cols.append(config.data.pnl_col)
     
-    missing_features = set(feature_cols) - set(df.columns)
+    missing_features = set(feature_cols) - set(calibration_df.columns)
     if missing_features:
         raise ValueError(f"Missing required features: {missing_features}")
     
     # Keep only essential columns + selected features
-    df = df[essential_cols + feature_cols]
+    calibration_df = calibration_df[essential_cols + feature_cols]
+    replay_df = replay_df[essential_cols + feature_cols]
+    
+    # Concatenate: calibration provides initial training data, replay_window for evaluation
+    # First model trains on calibration (last 252 days), tests on first days of replay_window
+    df = pd.concat([calibration_df, replay_df], ignore_index=True).sort_values(config.data.date_col).reset_index(drop=True)
+    print(f"Combined dataset: {len(calibration_df):,} calibration + {len(replay_df):,} replay = {len(df):,} total rows")
+    
     splitter = create_splitter(config)
     
     all_predictions = []
     split_metrics = []
+    final_model = None  # Will store the last trained model (on most recent window)
     
     # Count total splits for progress
     total_splits = sum(1 for _ in splitter.split(df, config.data.date_col))
     splitter = create_splitter(config)  # Recreate after counting
     
+    # Initialize hyperparameters (either from config or will be tuned)
+    current_params = config.get_model_params()
+    tuning_sessions = []
+    
     if not args.verbose:
         print(f"\nTraining {total_splits} walk-forward splits...", end='', flush=True)
     
     for i, (train_df, test_df) in enumerate(splitter.split(df, config.data.date_col)):
+        # Check if we should run hyperparameter tuning
+        if (config.hyperparameter_tuning.enabled and 
+            detect_quarter_boundary(i, config.walkforward.retrain_frequency_days, 
+                                   config.hyperparameter_tuning.tune_every_quarters)):
+            
+            # Get data for tuning (use current training data available up to this point)
+            tuning_data = df[df[config.data.date_col] <= train_df[config.data.date_col].max()].copy()
+            
+            # Keep only last 252 days for tuning (or all data if less)
+            unique_dates = tuning_data[config.data.date_col].unique()
+            unique_dates = np.sort(unique_dates)
+            if len(unique_dates) > 252:
+                tuning_start_date = unique_dates[-252]
+                tuning_data = tuning_data[tuning_data[config.data.date_col] >= tuning_start_date]
+            
+            # Start new line for tuning (interrupts progress)
+            if not args.verbose:
+                print(f"\n[Split {i+1}] ", end='', flush=True)
+            
+            # Run Optuna tuning
+            tuner = HyperparameterTuner(
+                feature_cols=feature_cols,
+                label_col=config.data.label_col,
+                group_col=config.data.group_col,
+                pnl_col=config.data.pnl_col,
+                n_trials=config.hyperparameter_tuning.n_trials,
+                timeout_minutes=config.hyperparameter_tuning.timeout_minutes,
+                study_name=f"{args.asset}_Q{len(tuning_sessions)+1}",
+                verbose=config.hyperparameter_tuning.verbose
+            )
+            
+            try:
+                best_params, study = tuner.tune(
+                    tuning_data,
+                    date_col=config.data.date_col,
+                    validation_days=config.hyperparameter_tuning.validation_days
+                )
+                
+                # Update current params
+                current_params = best_params
+                
+                # Save tuning results
+                tuning_session = {
+                    'quarter': len(tuning_sessions) + 1,
+                    'split_idx': i,
+                    'date': str(train_df[config.data.date_col].max()),
+                    'best_params': best_params,
+                    'best_score': study.best_value,
+                    'n_trials': len(study.trials)
+                }
+                tuning_sessions.append(tuning_session)
+                
+                # Continue on same line
+                if not args.verbose:
+                    print()
+                    print(f"Training {total_splits} walk-forward splits...", end='', flush=True)
+            
+            except Exception as e:
+                if not args.verbose:
+                    print(f"Tuning skipped: {str(e)[:50]}")
+                    print(f"Training {total_splits} walk-forward splits...", end='', flush=True)
+                else:
+                    print(f"Warning: Hyperparameter tuning failed: {e}")
+                    print(f"Continuing with previous parameters.")
+        
         if args.verbose:
             print(f"\nSplit {i+1}/{total_splits}:")
             print(f"  Train: {train_df[config.data.date_col].min()} to {train_df[config.data.date_col].max()} ({len(train_df)} rows)")
@@ -83,14 +184,15 @@ def main():
             elif (i + 1) % 5 == 0:
                 print('.', end='', flush=True)
         
-        # Train model
+        # Train model (keep last one as deployment model)
         model = train_ranker(
             train_df,
             feature_cols,
             config.data.label_col,
             config.data.group_col,
-            config.get_model_params()
+            current_params  # Use current (possibly tuned) params
         )
+        final_model = model  # Update deployment model (last one wins)
         
         # Predict on test
         test_df = test_df.copy()
@@ -138,32 +240,27 @@ def main():
     if not args.verbose:
         print(f" {total_splits}/{total_splits}")  # Complete the progress line
     
-    print("\n" + "="*70)
-    print("WALK-FORWARD COMPLETE")
-    print("="*70)
+    print()
     
     # Combine all predictions
     all_predictions_df = pd.concat(all_predictions, ignore_index=True)
     
-    # Overall metrics
+    # Filter metrics to replay_window only (exclude any calibration overlap if it exists)
+    replay_start_date = replay_df[config.data.date_col].min()
+    replay_predictions = all_predictions_df[all_predictions_df[config.data.date_col] >= replay_start_date]
+    
+    # Overall metrics (on replay window only)
     overall_metrics = evaluate_predictions(
-        all_predictions_df,
+        replay_predictions,
         k=config.selection.top_k,
         group_col=config.data.group_col,
         label_col=config.data.label_col,
         pnl_col=config.data.pnl_col
     )
-    print_metrics(overall_metrics, title="REPLAY WINDOW PERFORMANCE (Walk-Forward Validation)")
+    print_metrics(overall_metrics, title="Replay Window Performance")
     
-    # Train final model on all data
-    print("\nTraining final model on full dataset...")
-    final_model = train_ranker(
-        df,
-        feature_cols,
-        config.data.label_col,
-        config.data.group_col,
-        config.get_model_params()
-    )
+    # Use last walk-forward model for deployment (maintains windowed approach)
+    print("\nDeployment model: Last walk-forward model (most recent 252-day window)")
     
     # Save model
     artifact_mgr = ModelArtifact(config.paths.models_dir)
@@ -184,30 +281,28 @@ def main():
         additional_metadata={
             'asset': args.asset,
             'n_splits': len(split_metrics),
-            'total_train_samples': len(df)
+            'total_train_samples': len(df),
+            'hyperparameter_tuning_enabled': config.hyperparameter_tuning.enabled,
+            'tuning_sessions': tuning_sessions,  # Save tuning history
+            'final_hyperparameters': current_params  # Save final params used
         }
     )
     
-    # Save detailed results
     results_dir = Path(config.paths.results_dir) / run_id
     results_dir.mkdir(parents=True, exist_ok=True)
     
-    # Save predictions
+    # Save all artifacts
     all_predictions_df.to_parquet(results_dir / 'predictions.parquet', index=False)
-    print(f"\nPredictions saved: {results_dir / 'predictions.parquet'}")
-    
-    # Save split metrics
     with open(results_dir / 'split_metrics.json', 'w') as f:
         json.dump(split_metrics, f, indent=2)
-    print(f"Split metrics saved: {results_dir / 'split_metrics.json'}")
-    
-    # Save feature importance
     importance_df = final_model.get_feature_importance()
     importance_df.to_csv(results_dir / 'feature_importance.csv', index=False)
-    print(f"Feature importance saved: {results_dir / 'feature_importance.csv'}")
     
-    print("\nTraining complete!")
-    print(f"Run ID: {run_id}")
+    print(f"\nSaved: models/{run_id}")
+    if tuning_sessions:
+        print(f"  • {len(tuning_sessions)} hyperparameter tuning sessions")
+    print(f"  • {len(feature_cols)} features")
+    print(f"  • {len(split_metrics)} walk-forward splits")
 
 
 if __name__ == '__main__':

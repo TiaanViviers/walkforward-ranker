@@ -23,11 +23,7 @@ def flag_low_variance_features(
         Set of features flagged for low variance
     """
     variances = df[features].var()
-    low_var = variances[variances <= threshold].index.tolist()
-    
-    if low_var:
-        print(f"Flagged {len(low_var)} low-variance features")
-    
+    low_var = variances[variances <= threshold].index.tolist()    
     return set(low_var)
 
 
@@ -73,8 +69,6 @@ def flag_correlated_features(
                     flagged.add(feat2)
                 else:
                     flagged.add(feat1)
-    
-    print(f"Flagged {len(flagged)} correlated features (threshold={threshold})")
     
     return flagged
 
@@ -126,8 +120,6 @@ def flag_low_importance_features(
         ]['feature'].tolist()
     )
     
-    print(f"Flagged {len(flagged)} low-importance features (<={min_percentile}th percentile)")
-    
     return flagged, importance_df
 
 
@@ -167,10 +159,7 @@ def select_features(
     variance_threshold = float(variance_threshold)
     correlation_threshold = float(correlation_threshold)
     min_importance_percentile = int(min_importance_percentile)
-    
-    print(f"\nFeature selection strategy: {removal_strategy}")
-    print(f"Running parallel flagging on {len(feature_cols)} features...")
-    
+        
     # Flag features based on each criterion (parallel)
     variance_flags = flag_low_variance_features(df, feature_cols, variance_threshold)
     correlation_flags = flag_correlated_features(df, feature_cols, label_col, correlation_threshold)
@@ -202,28 +191,15 @@ def select_features(
     if removal_strategy == "aggressive":
         # Remove if flagged by ANY criterion (1+ flags)
         to_remove = {f for f, count in flag_counts.items() if count >= 1}
-        print(f"\nAggressive: Removing features with 1+ flags")
     elif removal_strategy == "moderate":
         # Remove if flagged by 2+ criteria
         to_remove = {f for f, count in flag_counts.items() if count >= 2}
-        print(f"\nModerate: Removing features with 2+ flags")
-    else:  # conservative
+    else:
         # Remove if flagged by ALL criteria
         to_remove = {f for f, count in flag_counts.items() if count == 3}
-        print(f"\nConservative: Removing features with 3 flags")
     
     final_features = [f for f in feature_cols if f not in to_remove]
     
-    # Print summary by flag count
-    print(f"\nFlag Summary:")
-    for flag_count in [0, 1, 2, 3]:
-        count = sum(1 for c in flag_counts.values() if c == flag_count)
-        if count > 0:
-            print(f"  {flag_count} flags: {count} features")
-    
-    print(f"\nFinal: {len(final_features)} features kept, {len(to_remove)} removed")
-    
-    # Collect selection info
     selection_info = {
         'initial_count': len(feature_cols),
         'final_count': len(final_features),

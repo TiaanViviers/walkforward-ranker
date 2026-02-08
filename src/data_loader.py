@@ -34,8 +34,6 @@ def load_data(path: str, date_col: str = "date", parse_dates: bool = True) -> pd
     if parse_dates and date_col in df.columns:
         df[date_col] = pd.to_datetime(df[date_col])
     
-    print(f"Loaded data: {len(df)} rows, {len(df.columns)} columns")
-    
     return df
 
 

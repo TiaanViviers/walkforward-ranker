@@ -110,10 +110,28 @@ def main():
     try:
         asset_paths = get_asset_paths(args.asset, args.data_dir)
         print(f"Asset: {args.asset}")
-        print(f"Data paths validated:")
-        print(f"  Calibration:   {asset_paths.calibration}")
-        print(f"  Replay window: {asset_paths.replay_window}")
-        print(f"  Holdout:       {asset_paths.holdout}")
+        print()
+        
+        # Show concise data report with date ranges
+        import pandas as pd
+        from src.data_loader import load_data
+        from src.config import load_config
+        
+        config = load_config(args.config)
+        date_col = config.data.date_col
+        
+        def print_dataset_info(name: str, path: Path):
+            df = pd.read_parquet(path)
+            df[date_col] = pd.to_datetime(df[date_col])
+            start_date = df[date_col].min().strftime('%Y-%m-%d')
+            end_date = df[date_col].max().strftime('%Y-%m-%d')
+            n_days = df[date_col].nunique()
+            print(f"{name:15} {start_date} to {end_date}  ({n_days:3d} days)")
+        
+        print_dataset_info("Calibration:", asset_paths.calibration)
+        print_dataset_info("Replay:", asset_paths.replay_window)
+        print_dataset_info("Holdout:", asset_paths.holdout)
+        
     except Exception as e:
         print(f"Error validating asset data: {e}")
         sys.exit(1)
@@ -148,10 +166,7 @@ def main():
     end_time = datetime.now()
     duration = end_time - start_time
     
-    print("\n" + "="*70)
-    print(f"PIPELINE COMPLETE: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Total duration: {duration}")
-    print("="*70)
+    print(f"\nPipeline complete! Duration: {duration}")
     
 
 def get_args():

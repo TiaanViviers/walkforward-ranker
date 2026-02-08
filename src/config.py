@@ -48,6 +48,18 @@ class SelectionConfig:
 
 
 @dataclass
+class HyperparameterTuningConfig:
+    """Hyperparameter tuning configuration."""
+    enabled: bool = False
+    n_trials: int = 50
+    timeout_minutes: int = 30
+    validation_days: int = 50
+    tune_every_quarters: int = 1  # Tune every N quarters
+    verbose: bool = True
+    search_space: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass
 class FeatureSelectionConfig:
     """Feature selection configuration."""
     correlation_threshold: float = 0.95
@@ -86,6 +98,9 @@ class Config:
         self.feature_selection = self._parse_feature_selection_config(
             config_dict.get('feature_selection', {})
         )
+        self.hyperparameter_tuning = self._parse_hyperparameter_tuning_config(
+            config_dict.get('hyperparameter_tuning', {})
+        )
         self.paths = self._parse_paths_config(config_dict.get('paths', {}))
         
         self.raw_config = config_dict
@@ -118,6 +133,10 @@ class Config:
     @staticmethod
     def _parse_feature_selection_config(fs_dict: Dict) -> FeatureSelectionConfig:
         return FeatureSelectionConfig(**fs_dict)
+    
+    @staticmethod
+    def _parse_hyperparameter_tuning_config(ht_dict: Dict) -> HyperparameterTuningConfig:
+        return HyperparameterTuningConfig(**ht_dict)
     
     @staticmethod
     def _parse_paths_config(paths_dict: Dict) -> PathsConfig:

@@ -93,7 +93,7 @@ class ModelArtifact:
         with open(run_dir / 'metadata.json', 'w') as f:
             json.dump(metadata, f, indent=2)
         
-        print(f"Model saved: {run_dir}")
+        # Model saved (message printed in calling script)
         print(f"  Features: {len(feature_list)}")
         print(f"  Run ID: {run_id}")
         

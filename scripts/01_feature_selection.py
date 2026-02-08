@@ -28,16 +28,15 @@ def main():
     parser.add_argument('--data-dir', default='data', help='Base data directory')
     args = parser.parse_args()
     
-    print("="*70)
+    print("\n" + "="*70)
     print("FEATURE SELECTION")
     print("="*70)
-    print(f"Asset: {args.asset}")
     
     asset_paths = get_asset_paths(args.asset, args.data_dir)
     config = load_config(args.config)
     df = load_data(str(asset_paths.calibration), config.data.date_col)
     all_features = config.get_all_features()
-    print(f"Total features: {len(all_features)}")
+    print(f"Evaluating {len(all_features)} features...")
     
     # Validate data
     validate_data(
@@ -48,8 +47,6 @@ def main():
         all_features
     )
     
-    # Run feature selection
-    print("\nRunning feature selection pipeline...")
     selected_features, selection_info = select_features(
         df,
         all_features,
@@ -94,24 +91,6 @@ def main():
     print(f"Final features:       {selection_info['final_count']}")
     print(f"Reduction:            {100 * (1 - selection_info['final_count'] / selection_info['initial_count']):.1f}%")
     print("="*70)
-    
-    print("\nTop 10 features by importance:")
-    for i, feat_info in enumerate(selection_info['importance'][:10], 1):
-        print(f"  {i:2d}. {feat_info['feature']:30s} {feat_info['importance']:10.2f}")
-    
-    # Print selected and removed features
-    print("\n" + "="*70)
-    print("SELECTED FEATURES ({} features)".format(len(selected_features)))
-    print("="*70)
-    for i, feat in enumerate(sorted(selected_features), 1):
-        print(f"  {i:2d}. {feat}")
-    
-    removed_features = set(all_features) - set(selected_features)
-    print("\n" + "="*70)
-    print("REMOVED FEATURES ({} features)".format(len(removed_features)))
-    print("="*70)
-    for i, feat in enumerate(sorted(removed_features), 1):
-        print(f"  {i:2d}. {feat}")
 
 
 if __name__ == '__main__':

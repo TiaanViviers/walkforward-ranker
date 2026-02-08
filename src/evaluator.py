@@ -231,41 +231,15 @@ def evaluate_predictions(
 
 
 def print_metrics(metrics: Dict[str, float], title: str = "EVALUATION METRICS"):
-    """Print metrics with explicit explanations for top-1, top-3, and top-5."""
-    print("\n" + "=" * 80)
-    print(title)
-    print("=" * 80)
-    
-    for k_val in [1, 3, 5]:
-        print(f"\n TOP-{k_val} SELECTION METRICS")
-        print("-" * 80)
-        
-        mean_sel = metrics.get(f'mean_selected_pnl_{k_val}', 0)
-        mean_opt = metrics.get(f'mean_optimal_pnl_{k_val}', 0)
-        efficiency = metrics.get(f'pnl_efficiency_{k_val}', 0)
-        regret = metrics.get(f'regret_{k_val}', 0)
-        win_rate_sel = metrics.get(f'win_rate_selected_{k_val}', 0)
-        hit_rate = metrics.get(f'hit_rate_{k_val}', 0)
-        ndcg = metrics.get(f'ndcg_{k_val}', 0)
-        
-        print(f"  Selection Strategy: Pick top-{k_val} ranked configs each day")
-        print(f"  Mean Daily PnL (selected): ${mean_sel:,.2f}")
-        print(f"  Mean Daily PnL (optimal):  ${mean_opt:,.2f}")
-        print(f"  Efficiency: {efficiency:.2%} (capturing {efficiency:.2%} of optimal profit)")
-        print(f"  Regret: ${regret:,.2f}/day (leaving this much on the table)")
-        print(f"  Win Rate: {win_rate_sel:.2%} (% of selected configs with positive PnL)")
-        print(f"  Hit Rate: {hit_rate:.2%} (% days with ≥1 actual top-{k_val} in predicted top-{k_val})")
-        print(f"  NDCG@{k_val}: {ndcg:.4f} (ranking quality: 0=random, 1=perfect)")
-    
-    print("\n" + "=" * 80)
-    print("SUMMARY ACROSS ALL K VALUES")
-    print("=" * 80)
+    """Print concise metrics summary."""
+    print(f"\n{title}")
+    print("=" * 70)
     print(f"  {'K':<5} {'Mean PnL':<12} {'Efficiency':<12} {'Win Rate':<12} {'NDCG':<10}")
-    print("-" * 80)
+    print("-" * 70)
     for k_val in [1, 3, 5]:
         mean_sel = metrics.get(f'mean_selected_pnl_{k_val}', 0)
         efficiency = metrics.get(f'pnl_efficiency_{k_val}', 0)
         win_rate = metrics.get(f'win_rate_selected_{k_val}', 0)
         ndcg = metrics.get(f'ndcg_{k_val}', 0)
         print(f"  {k_val:<5} ${mean_sel:<11,.2f} {efficiency:<11.2%} {win_rate:<11.2%} {ndcg:<10.4f}")
-    print("=" * 80)
+    print("=" * 70)
