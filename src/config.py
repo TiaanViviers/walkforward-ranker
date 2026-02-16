@@ -54,7 +54,7 @@ class HyperparameterTuningConfig:
     n_trials: int = 50
     timeout_minutes: int = 30
     validation_days: int = 50
-    tune_every_quarters: int = 1  # Tune every N quarters
+    tune_every_quarters: float = 1.0  # Tune every N quarters (0.33 = monthly, 1.0 = quarterly)
     verbose: bool = True
     search_space: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 

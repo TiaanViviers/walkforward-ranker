@@ -13,6 +13,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import json
+import shutil
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -28,23 +29,26 @@ from src.asset_utils import get_asset_paths
 from src.hyperparameter_tuner import HyperparameterTuner
 
 
-def detect_quarter_boundary(split_idx: int, retrain_frequency: int, tune_every_quarters: int) -> bool:
+def detect_quarter_boundary(split_idx: int, retrain_frequency: int, tune_every_quarters: float) -> bool:
     """
-    Detect if we're at a quarter boundary (time to retune hyperparameters).
+    Detect if we're at a tuning boundary (time to retune hyperparameters).
     
     Args:
         split_idx: Current split index (0-based)
         retrain_frequency: Days between retrains (typically 5)
-        tune_every_quarters: Tune every N quarters
+        tune_every_quarters: Tune every N quarters (can be fractional, e.g., 0.33 for monthly)
         
     Returns:
-        True if this is the start of a tuning quarter
+        True if this is the start of a tuning period
     """
     # ~63 trading days per quarter, retraining every 5 days = ~13 splits per quarter
     splits_per_quarter = 63 // retrain_frequency
-    splits_per_tuning_period = splits_per_quarter * tune_every_quarters
+    splits_per_tuning_period = int(splits_per_quarter * tune_every_quarters)
     
-    # Tune at start of every tuning period (split 0, 13, 26, 39, ...)
+    # Ensure at least 1 split between tuning sessions
+    splits_per_tuning_period = max(1, splits_per_tuning_period)
+    
+    # Tune at start of every tuning period (split 0, 4, 8, 12, ... for monthly)
     return split_idx % splits_per_tuning_period == 0
 
 
@@ -77,9 +81,13 @@ def main():
     if hasattr(config.data, 'pnl_col') and config.data.pnl_col:
         essential_cols.append(config.data.pnl_col)
     
-    missing_features = set(feature_cols) - set(calibration_df.columns)
-    if missing_features:
-        raise ValueError(f"Missing required features: {missing_features}")
+    missing_features_cal = set(feature_cols) - set(calibration_df.columns)
+    if missing_features_cal:
+        raise ValueError(f"Missing required features in calibration: {missing_features_cal}")
+    
+    missing_features_replay = set(feature_cols) - set(replay_df.columns)
+    if missing_features_replay:
+        raise ValueError(f"Missing required features in replay_window: {missing_features_replay}")
     
     # Keep only essential columns + selected features
     calibration_df = calibration_df[essential_cols + feature_cols]
@@ -95,6 +103,15 @@ def main():
     all_predictions = []
     split_metrics = []
     final_model = None  # Will store the last trained model (on most recent window)
+    
+    # Setup incremental saving to reduce memory pressure
+    run_id = args.run_id or f"{args.asset}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}"
+    results_dir = Path(config.paths.results_dir) / run_id
+    results_dir.mkdir(parents=True, exist_ok=True)
+    predictions_chunks_dir = results_dir / 'predictions_chunks'
+    predictions_chunks_dir.mkdir(exist_ok=True)
+    chunk_counter = 0
+    CHUNK_SIZE = 20  # Save every 20 splits to reduce memory
     
     # Count total splits for progress
     total_splits = sum(1 for _ in splitter.split(df, config.data.date_col))
@@ -236,14 +253,46 @@ def main():
             'test_end': str(test_df[config.data.date_col].max()),
             **json_metrics
         })
+        
+        # Incremental save to reduce memory pressure
+        if len(all_predictions) >= CHUNK_SIZE:
+            chunk_df = pd.concat(all_predictions, ignore_index=True)
+            chunk_path = predictions_chunks_dir / f'chunk_{chunk_counter:03d}.parquet'
+            chunk_df.to_parquet(chunk_path, index=False)
+            all_predictions.clear()  # Free memory
+            chunk_counter += 1
     
     if not args.verbose:
         print(f" {total_splits}/{total_splits}")  # Complete the progress line
     
     print()
     
-    # Combine all predictions
-    all_predictions_df = pd.concat(all_predictions, ignore_index=True)
+    # Save any remaining predictions
+    if all_predictions:
+        chunk_df = pd.concat(all_predictions, ignore_index=True)
+        chunk_path = predictions_chunks_dir / f'chunk_{chunk_counter:03d}.parquet'
+        chunk_df.to_parquet(chunk_path, index=False)
+        all_predictions.clear()
+    
+    # Combine all prediction chunks from disk (memory-efficient)
+    chunk_files = sorted(predictions_chunks_dir.glob('chunk_*.parquet'))
+    
+    if len(chunk_files) == 0:
+        raise RuntimeError("No prediction chunks found - training may have failed early")
+    
+    print(f"Combining {len(chunk_files)} prediction chunks...")
+    
+    # Memory-efficient merge: concatenate in batches to avoid O(n²) I/O
+    if len(chunk_files) == 1:
+        all_predictions_df = pd.read_parquet(chunk_files[0])
+    else:
+        # Read all chunks in one pass (cheaper than incremental merge)
+        # This loads ~1.2GB max (all predictions) but only once
+        chunk_dfs = []
+        for chunk_file in chunk_files:
+            chunk_dfs.append(pd.read_parquet(chunk_file))
+        all_predictions_df = pd.concat(chunk_dfs, ignore_index=True)
+        del chunk_dfs  # Free memory immediately
     
     # Filter metrics to replay_window only (exclude any calibration overlap if it exists)
     replay_start_date = replay_df[config.data.date_col].min()
@@ -262,22 +311,15 @@ def main():
     # Use last walk-forward model for deployment (maintains windowed approach)
     print("\nDeployment model: Last walk-forward model (most recent 252-day window)")
     
-    # Save model
+    # Save model (use the run_id already created at the start)
     artifact_mgr = ModelArtifact(config.paths.models_dir)
-    
-    # Include asset in run_id
-    if args.run_id:
-        full_run_id = f"{args.asset}_{args.run_id}"
-    else:
-        from datetime import datetime
-        full_run_id = f"{args.asset}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     
     run_id = artifact_mgr.save(
         final_model,
         config.to_dict(),
         feature_cols,
         metrics=overall_metrics,
-        run_id=full_run_id,
+        run_id=run_id,  # Fixed: use run_id defined at line 108
         additional_metadata={
             'asset': args.asset,
             'n_splits': len(split_metrics),
@@ -288,15 +330,15 @@ def main():
         }
     )
     
-    results_dir = Path(config.paths.results_dir) / run_id
-    results_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Save all artifacts
+    # Save all artifacts (results_dir already created at start)
     all_predictions_df.to_parquet(results_dir / 'predictions.parquet', index=False)
     with open(results_dir / 'split_metrics.json', 'w') as f:
         json.dump(split_metrics, f, indent=2)
     importance_df = final_model.get_feature_importance()
     importance_df.to_csv(results_dir / 'feature_importance.csv', index=False)
+    
+    # Cleanup temporary chunks directory
+    shutil.rmtree(predictions_chunks_dir)
     
     print(f"\nSaved: models/{run_id}")
     if tuning_sessions:

@@ -1,8 +1,6 @@
 """Selection policies for choosing top-K configs."""
 
 import pandas as pd
-import numpy as np
-from typing import List
 
 
 def select_top_k(

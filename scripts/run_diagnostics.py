@@ -12,6 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 import pandas as pd
+import numpy as np
 import json
 import matplotlib.pyplot as plt
 
@@ -41,7 +42,6 @@ def main():
     # Setup paths
     results_dir = Path(args.results_dir) / args.run_id
     predictions_path = results_dir / 'predictions.parquet'
-    split_metrics_path = results_dir / 'split_metrics.json'
     diagnostics_dir = results_dir / 'diagnostics'
     plots_dir = diagnostics_dir / 'plots'
     

@@ -2,7 +2,7 @@
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List
+from typing import Dict
 from sklearn.metrics import ndcg_score
 
 
@@ -111,7 +111,7 @@ def ndcg_at_k(
         try:
             score = ndcg_score(y_true, y_score, k=k)
             ndcg_scores.append(score)
-        except:
+        except Exception:
             continue
     
     return np.mean(ndcg_scores) if ndcg_scores else 0.0

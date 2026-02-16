@@ -1,9 +1,7 @@
 """Walk-forward time series splitting."""
 
 import pandas as pd
-import numpy as np
 from typing import Iterator, Tuple
-from datetime import timedelta
 
 
 class WalkForwardSplitter:
@@ -128,25 +126,27 @@ class WalkForwardSplitter:
         Returns:
             List of dicts with split information
         """
-        # Count actual unique trading days
-        train_trading_days = train_df[date_col].nunique()
-        test_trading_days = test_df[date_col].nunique()
+        split_info = []
         
-        info = {
-            'split_id': i,
-            'train_start': train_df[date_col].min(),
-            'train_end': train_df[date_col].max(),
-            'test_start': test_df[date_col].min(),
-            'test_end': test_df[date_col].max(),
-            'train_size': len(train_df),
-            'test_size': len(test_df),
-            'train_trading_days': train_trading_days,
-            'test_trading_days': test_trading_days,
-            'test_size': len(test_df),
-            'train_days': (train_df[date_col].max() - train_df[date_col].min()).days,
-            'test_days': (test_df[date_col].max() - test_df[date_col].min()).days
-        }
-        split_info.append(info)
+        for i, (train_df, test_df) in enumerate(self.split(df, date_col)):
+            # Count actual unique trading days
+            train_trading_days = train_df[date_col].nunique()
+            test_trading_days = test_df[date_col].nunique()
+            
+            info = {
+                'split_id': i,
+                'train_start': train_df[date_col].min(),
+                'train_end': train_df[date_col].max(),
+                'test_start': test_df[date_col].min(),
+                'test_end': test_df[date_col].max(),
+                'train_size': len(train_df),
+                'test_size': len(test_df),
+                'train_trading_days': train_trading_days,
+                'test_trading_days': test_trading_days,
+                'train_days': (train_df[date_col].max() - train_df[date_col].min()).days,
+                'test_days': (test_df[date_col].max() - test_df[date_col].min()).days
+            }
+            split_info.append(info)
         
         return split_info
 

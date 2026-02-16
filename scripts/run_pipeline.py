@@ -114,7 +114,6 @@ def main():
         
         # Show concise data report with date ranges
         import pandas as pd
-        from src.data_loader import load_data
         from src.config import load_config
         
         config = load_config(args.config)
